@@ -3,6 +3,7 @@ package catalog
 import (
 	"strconv"
 
+	"github.com/Dataman-Cloud/crane/src/plugins/auth"
 	"github.com/Dataman-Cloud/crane/src/utils/cranerror"
 	"github.com/Dataman-Cloud/crane/src/utils/httpresponse"
 
@@ -23,10 +24,13 @@ const (
 	CodeCatalogInvalidIcon        = "400-15036"
 	CodeCatalogDeleteFaild        = "503-15037"
 	CodeCatalogForbiddenOperation = "403-15038"
+	CodeCatalogUpdateFaild        = "503-15039"
+	CodeCatalogCreateFaild        = "503-15040"
 )
 
 const (
 	CATALOG_SYSTEM_DEFAULT = 0
+	CATALOG_USER_CUSTOM    = 1
 )
 
 type CatalogApi struct {
@@ -54,11 +58,10 @@ func (catalogApi *CatalogApi) GetCatalog(ctx *gin.Context) {
 }
 
 func (catalogApi *CatalogApi) ListCatalog(ctx *gin.Context) {
-	//account, _ := ctx.Get("account")
 	catalogs, err := catalogApi.List()
 	if err != nil {
 		log.Errorf("get catalog list error: %v", err)
-		craneerr := cranerror.NewError(CodeCatalogInvalidUser, err.Error())
+		craneerr := cranerror.NewError(CodeCatalogListCatalogError, err.Error())
 		httpresponse.Error(ctx, craneerr)
 		return
 	}
@@ -67,8 +70,15 @@ func (catalogApi *CatalogApi) ListCatalog(ctx *gin.Context) {
 }
 
 func (catalogApi *CatalogApi) CreateCatalog(ctx *gin.Context) {
+	account, ok := ctx.Get("account")
+	if !ok {
+		craneerr := cranerror.NewError(CodeCatalogInvalidUser, "invalid user login")
+		httpresponse.Error(ctx, craneerr)
+		return
+	}
+
 	var catalog Catalog
-	if err := ctx.BindJSON(&catalog); err != nil {
+	if err := ctx.Bind(&catalog); err != nil {
 		log.Errorf("invalid param error: %v", err)
 		craneerr := cranerror.NewError(CodeCatalogInvalidParam, err.Error())
 		httpresponse.Error(ctx, craneerr)
@@ -81,6 +91,7 @@ func (catalogApi *CatalogApi) CreateCatalog(ctx *gin.Context) {
 		return
 	} else {
 		catalog.IconData = iconData
+		catalog.Type = CATALOG_USER_CUSTOM
 	}
 
 	if catalog.Bundle == "" {
@@ -89,7 +100,12 @@ func (catalogApi *CatalogApi) CreateCatalog(ctx *gin.Context) {
 		return
 	}
 
-	catalogApi.Save(&catalog)
+	catalog.AccountId = account.(auth.Account).ID
+	if err := catalogApi.Save(&catalog); err != nil {
+		craneerr := cranerror.NewError(CodeCatalogCreateFaild, "invalid bundle")
+		httpresponse.Error(ctx, craneerr)
+		return
+	}
 	httpresponse.Ok(ctx, catalog)
 }
 
@@ -127,7 +143,7 @@ func (catalogApi *CatalogApi) DeleteCatalog(ctx *gin.Context) {
 
 func (catalogApi *CatalogApi) UpdateCatalog(ctx *gin.Context) {
 	var catalog Catalog
-	if err := ctx.BindJSON(&catalog); err != nil {
+	if err := ctx.Bind(&catalog); err != nil {
 		log.Errorf("invalid param error: %v", err)
 		craneerr := cranerror.NewError(CodeCatalogInvalidParam, err.Error())
 		httpresponse.Error(ctx, craneerr)
@@ -172,11 +188,14 @@ func (catalogApi *CatalogApi) UpdateCatalog(ctx *gin.Context) {
 	}
 
 	catalog.ID = cl.ID
-	catalog.Name = cl.Name
-	catalog.Bundle = cl.Bundle
-	catalog.Description = cl.Description
-	catalog.UserId = cl.UserId
 	catalog.Type = cl.Type
+	catalog.AccountId = cl.AccountId
+	if err = catalogApi.Update(&catalog); err != nil {
+		log.Errorf("update catalog error: %v", err)
+		craneerr := cranerror.NewError(CodeCatalogUpdateFaild, err.Error())
+		httpresponse.Error(ctx, craneerr)
+		return
+	}
 
 	httpresponse.Ok(ctx, "update success")
 }
